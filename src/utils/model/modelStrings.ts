@@ -12,7 +12,12 @@ import {
   type CanonicalModelId,
   type ModelKey,
 } from './configs.js'
-import { type APIProvider, getAPIProvider } from './providers.js'
+import {
+  type APIProvider,
+  getAPIProvider,
+  getOpenAICompatibleDefaultModel,
+  getOpenAICompatibleSmallFastModel,
+} from './providers.js'
 
 /**
  * Maps each model version to its provider-specific model ID string.
@@ -22,10 +27,33 @@ export type ModelStrings = Record<ModelKey, string>
 
 const MODEL_KEYS = Object.keys(ALL_MODEL_CONFIGS) as ModelKey[]
 
+function getOpenAIModelStrings(): ModelStrings {
+  const defaultModel = getOpenAICompatibleDefaultModel()
+  const smallModel = getOpenAICompatibleSmallFastModel()
+
+  return {
+    haiku35: smallModel,
+    haiku45: smallModel,
+    sonnet35: defaultModel,
+    sonnet37: defaultModel,
+    sonnet40: defaultModel,
+    sonnet45: defaultModel,
+    sonnet46: defaultModel,
+    opus40: defaultModel,
+    opus41: defaultModel,
+    opus45: defaultModel,
+    opus46: defaultModel,
+  }
+}
+
 function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
+  if (provider === 'openai') {
+    return getOpenAIModelStrings()
+  }
+  const anthropicProvider = provider
   const out = {} as ModelStrings
   for (const key of MODEL_KEYS) {
-    out[key] = ALL_MODEL_CONFIGS[key][provider]
+    out[key] = ALL_MODEL_CONFIGS[key][anthropicProvider]
   }
   return out
 }

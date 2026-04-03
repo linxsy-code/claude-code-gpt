@@ -11,7 +11,15 @@ import { getDisplayPath } from './file.js';
 import { formatNumber } from './format.js';
 import { getIdeClientName, type IDEExtensionInstallationStatus, isJetBrainsIde, toIDEDisplayName } from './ide.js';
 import { getClaudeAiUserDefaultModelDescription, modelDisplayString } from './model/model.js';
-import { getAPIProvider } from './model/providers.js';
+import {
+  getAPIProvider,
+  getOpenAICompatibleBaseUrl,
+  getOpenAICompatibleConfiguredModel,
+  getOpenAICompatibleProviderName,
+  isOpenAICodexProviderEnabled,
+  isMoonshotProviderEnabled,
+  isQwenProviderEnabled,
+} from './model/providers.js';
 import { getMTLSConfig } from './mtls.js';
 import { checkInstall } from './nativeInstaller/index.js';
 import { getProxyUrl } from './proxy.js';
@@ -26,7 +34,7 @@ export type Property = {
 };
 export type Diagnostic = React.ReactNode;
 export function buildSandboxProperties(): Property[] {
-  if ((process.env.USER_TYPE) !== 'ant') {
+  if (("external" as string) !== 'ant') {
     return [];
   }
   const isSandboxed = SandboxManager.isSandboxingEnabled();
@@ -244,7 +252,8 @@ export function buildAPIProviderProperties(): Property[] {
     const providerLabel = {
       bedrock: 'AWS Bedrock',
       vertex: 'Google Vertex AI',
-      foundry: 'Microsoft Foundry'
+      foundry: 'Microsoft Foundry',
+      openai: getOpenAICompatibleProviderName(),
     }[apiProvider];
     properties.push({
       label: 'API provider',
@@ -318,6 +327,39 @@ export function buildAPIProviderProperties(): Property[] {
     if (isEnvTruthy(process.env.CLAUDE_CODE_SKIP_FOUNDRY_AUTH)) {
       properties.push({
         value: 'Microsoft Foundry auth skipped'
+      });
+    }
+  } else if (apiProvider === 'openai') {
+    const openaiBaseUrl = getOpenAICompatibleBaseUrl();
+    if (openaiBaseUrl) {
+      properties.push({
+        label: `${getOpenAICompatibleProviderName()} base URL`,
+        value: openaiBaseUrl
+      });
+    }
+    const configuredModel = getOpenAICompatibleConfiguredModel();
+    if (configuredModel) {
+      properties.push({
+        label: `${getOpenAICompatibleProviderName()} model`,
+        value: configuredModel
+      });
+    }
+    if (isQwenProviderEnabled() && process.env.QWEN_SMALL_FAST_MODEL) {
+      properties.push({
+        label: 'Qwen fast model',
+        value: process.env.QWEN_SMALL_FAST_MODEL
+      });
+    }
+    if (isOpenAICodexProviderEnabled() && process.env.OPENAI_CODEX_SMALL_FAST_MODEL) {
+      properties.push({
+        label: 'OpenAI Codex fast model',
+        value: process.env.OPENAI_CODEX_SMALL_FAST_MODEL
+      });
+    }
+    if (isMoonshotProviderEnabled() && process.env.MOONSHOT_SMALL_FAST_MODEL) {
+      properties.push({
+        label: 'Moonshot fast model',
+        value: process.env.MOONSHOT_SMALL_FAST_MODEL
       });
     }
   }

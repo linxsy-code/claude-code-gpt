@@ -10,7 +10,10 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { getModelStrings } from 'src/utils/model/modelStrings.js'
-import { getAPIProvider } from 'src/utils/model/providers.js'
+import {
+  getAPIProvider,
+  isOpenAICodexProviderEnabled,
+} from 'src/utils/model/providers.js'
 import {
   getIsNonInteractiveSession,
   preferThirdPartyAuthentication,
@@ -76,6 +79,11 @@ import {
 import { sleep } from './sleep.js'
 import { jsonParse } from './slowOperations.js'
 import { clearToolSchemaCache } from './toolSchemaCache.js'
+import {
+  getOpenAICodexAccountInfoFromToken,
+  getOpenAICodexAccessTokenSync,
+  getOpenAICodexTokenSource,
+} from './openaiCodexAuth.js'
 
 /** Default TTL for API key helper cache in milliseconds (5 minutes) */
 const DEFAULT_API_KEY_HELPER_TTL = 5 * 60 * 1000
@@ -115,7 +123,11 @@ export function isAnthropicAuthEnabled(): boolean {
   const is3P =
     isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
     isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI_CODEX) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_MOONSHOT) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_QWEN)
 
   // Check if user has configured an external API key source
   // This allows externally-provided API keys to work (without requiring proxy configuration)
@@ -1594,7 +1606,11 @@ export function is1PApiCustomer(): boolean {
   if (
     isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
     isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI_CODEX) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_MOONSHOT) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_QWEN)
   ) {
     return false
   }
@@ -1733,7 +1749,11 @@ export function isUsing3PServices(): boolean {
   return !!(
     isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
     isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI_CODEX) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_MOONSHOT) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_QWEN)
   )
 }
 
@@ -1862,6 +1882,20 @@ export type UserAccountInfo = {
 
 export function getAccountInformation() {
   const apiProvider = getAPIProvider()
+  if (apiProvider === 'openai' && isOpenAICodexProviderEnabled()) {
+    const codexToken = getOpenAICodexAccessTokenSync()
+    if (!codexToken) {
+      return undefined
+    }
+    const tokenInfo = getOpenAICodexAccountInfoFromToken(codexToken)
+    const tokenSource = getOpenAICodexTokenSource()
+    return {
+      subscription: 'ChatGPT OAuth',
+      tokenSource:
+        tokenSource === 'stored' ? 'OpenAI Codex stored OAuth' : tokenSource,
+      email: tokenInfo.email,
+    }
+  }
   // Only provide account info for first-party Anthropic API
   if (apiProvider !== 'firstParty') {
     return undefined

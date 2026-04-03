@@ -14,9 +14,11 @@ import { logEvent } from '../services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/metadata.js'
 import { getAPIMetadata } from '../services/api/claude.js'
 import { getAnthropicClient } from '../services/api/client.js'
+import { sideQueryWithOpenAI } from '../services/api/openai.js'
 import { getModelBetas, modelSupportsStructuredOutputs } from './betas.js'
 import { computeFingerprint } from './fingerprint.js'
 import { normalizeModelStringForAPI } from './model/model.js'
+import { getAPIProvider } from './model/providers.js'
 
 type MessageParam = Anthropic.MessageParam
 type TextBlockParam = Anthropic.TextBlockParam
@@ -120,6 +122,21 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     thinking,
     stop_sequences,
   } = opts
+
+  if (getAPIProvider() === 'openai') {
+    return (await sideQueryWithOpenAI({
+      model,
+      system,
+      messages,
+      tools: tools as Array<Record<string, unknown>> | undefined,
+      tool_choice: tool_choice as Record<string, unknown> | undefined,
+      output_format,
+      max_tokens,
+      signal,
+      temperature,
+      querySource: opts.querySource,
+    })) as unknown as BetaMessage
+  }
 
   const client = await getAnthropicClient({
     maxRetries,

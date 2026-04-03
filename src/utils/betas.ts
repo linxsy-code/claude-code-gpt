@@ -15,6 +15,7 @@ import {
   PROMPT_CACHING_SCOPE_BETA_HEADER,
   REDACT_THINKING_BETA_HEADER,
   STRUCTURED_OUTPUTS_BETA_HEADER,
+  SUMMARIZE_CONNECTOR_TEXT_BETA_HEADER,
   TOKEN_EFFICIENT_TOOLS_BETA_HEADER,
   TOOL_SEARCH_BETA_HEADER_1P,
   TOOL_SEARCH_BETA_HEADER_3P,
@@ -26,7 +27,11 @@ import { has1mContext } from './context.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
-import { getAPIProvider } from './model/providers.js'
+import {
+  getAPIProvider,
+  isCustomAnthropicBaseUrl,
+  supportsAnthropicGatewayCapability,
+} from './model/providers.js'
 import { getInitialSettings } from './settings/settings.js'
 
 /**
@@ -145,14 +150,30 @@ export function modelSupportsStructuredOutputs(model: string): boolean {
   if (provider !== 'firstParty' && provider !== 'foundry') {
     return false
   }
-  return (
+  if (
     canonical.includes('claude-sonnet-4-6') ||
     canonical.includes('claude-sonnet-4-5') ||
     canonical.includes('claude-opus-4-1') ||
     canonical.includes('claude-opus-4-5') ||
     canonical.includes('claude-opus-4-6') ||
     canonical.includes('claude-haiku-4-5')
-  )
+  ) {
+    return true
+  }
+
+  // A custom ANTHROPIC_BASE_URL may front a non-Claude model while still
+  // translating Anthropic structured-output semantics. Keep the explicit
+  // Claude allowlist above, but trust gateway-backed non-Claude model IDs.
+  if (
+    provider === 'firstParty' &&
+    isCustomAnthropicBaseUrl() &&
+    supportsAnthropicGatewayCapability('structured_outputs') &&
+    !canonical.includes('claude-')
+  ) {
+    return true
+  }
+
+  return false
 }
 
 // @[MODEL LAUNCH]: Add the new model if it supports auto mode (specifically PI probes) — ask in #proj-claude-code-safety-research.
@@ -226,7 +247,20 @@ export function shouldIncludeFirstPartyOnlyBetas(): boolean {
 export function shouldUseGlobalCacheScope(): boolean {
   return (
     getAPIProvider() === 'firstParty' &&
+    supportsAnthropicGatewayCapability('prompt_caching_scope') &&
     !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
+  )
+}
+
+function supportsFirstPartyBetaCapability(
+  capability:
+    | 'structured_outputs'
+    | 'context_management'
+    | 'redact_thinking',
+): boolean {
+  return (
+    getAPIProvider() === 'foundry' ||
+    supportsAnthropicGatewayCapability(capability)
   )
 }
 
@@ -269,10 +303,32 @@ export const getAllModelBetas = memoize((model: string): string[] => {
   if (
     includeFirstPartyOnlyBetas &&
     modelSupportsISP(model) &&
+    supportsFirstPartyBetaCapability('redact_thinking') &&
     !getIsNonInteractiveSession() &&
     getInitialSettings().showThinkingSummaries !== true
   ) {
     betaHeaders.push(REDACT_THINKING_BETA_HEADER)
+  }
+
+  // POC: server-side connector-text summarization (anti-distillation). The
+  // API buffers assistant text between tool calls, summarizes it, and returns
+  // the summary with a signature so the original can be restored on subsequent
+  // turns — same mechanism as thinking blocks. Ant-only while we measure
+  // TTFT/TTLT/capacity; betas already flow to tengu_api_success for splitting.
+  // Backend independently requires Capability.ANTHROPIC_INTERNAL_RESEARCH.
+  //
+  // USE_CONNECTOR_TEXT_SUMMARIZATION is tri-state: =1 forces on (opt-in even
+  // if GB is off), =0 forces off (opt-out of a GB rollout you were bucketed
+  // into), unset defers to GB.
+  if (
+    SUMMARIZE_CONNECTOR_TEXT_BETA_HEADER &&
+    process.env.USER_TYPE === 'ant' &&
+    includeFirstPartyOnlyBetas &&
+    !isEnvDefinedFalsy(process.env.USE_CONNECTOR_TEXT_SUMMARIZATION) &&
+    (isEnvTruthy(process.env.USE_CONNECTOR_TEXT_SUMMARIZATION) ||
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_slate_prism', false))
+  ) {
+    betaHeaders.push(SUMMARIZE_CONNECTOR_TEXT_BETA_HEADER)
   }
 
   // Add context management beta for tool clearing (ant opt-in) or thinking preservation
@@ -284,6 +340,7 @@ export const getAllModelBetas = memoize((model: string): string[] => {
 
   if (
     shouldIncludeFirstPartyOnlyBetas() &&
+    supportsFirstPartyBetaCapability('context_management') &&
     (antOptedIntoToolClearing || thinkingPreservationEnabled)
   ) {
     betaHeaders.push(CONTEXT_MANAGEMENT_BETA_HEADER)
@@ -304,6 +361,7 @@ export const getAllModelBetas = memoize((model: string): string[] => {
   if (
     includeFirstPartyOnlyBetas &&
     modelSupportsStructuredOutputs(model) &&
+    supportsFirstPartyBetaCapability('structured_outputs') &&
     strictToolsEnabled
   ) {
     betaHeaders.push(STRUCTURED_OUTPUTS_BETA_HEADER)
@@ -330,7 +388,10 @@ export const getAllModelBetas = memoize((model: string): string[] => {
   }
 
   // Always send the beta header for 1P. The header is a no-op without a scope field.
-  if (includeFirstPartyOnlyBetas) {
+  if (
+    includeFirstPartyOnlyBetas &&
+    supportsAnthropicGatewayCapability('prompt_caching_scope')
+  ) {
     betaHeaders.push(PROMPT_CACHING_SCOPE_BETA_HEADER)
   }
 

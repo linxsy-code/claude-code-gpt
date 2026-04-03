@@ -7,6 +7,8 @@ import type {
 } from '../entrypoints/sdk/controlTypes.js'
 import type { RemotePermissionResponse } from '../remote/RemoteSessionManager.js'
 import { logForDebugging } from '../utils/debug.js'
+import { getWebSocketTLSOptions } from '../utils/mtls.js'
+import { getWebSocketProxyUrl } from '../utils/proxy.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import type { RemoteMessageContent } from '../utils/teleport/api.js'
 
@@ -55,6 +57,8 @@ export class DirectConnectSessionManager {
     // Bun's WebSocket supports headers option but the DOM typings don't
     this.ws = new WebSocket(this.config.wsUrl, {
       headers,
+      proxy: getWebSocketProxyUrl(this.config.wsUrl),
+      tls: getWebSocketTLSOptions() || undefined,
     } as unknown as string[])
 
     this.ws.addEventListener('open', () => {

@@ -6,7 +6,6 @@ import {
   isTeamPremiumSubscriber,
 } from '../auth.js'
 import { getModelStrings } from './modelStrings.js'
-import { getAntModels } from './antModels.js'
 import {
   COST_TIER_3_15,
   COST_HAIKU_35,
@@ -33,6 +32,15 @@ import {
 } from './model.js'
 import { has1mContext } from '../context.js'
 import { getGlobalConfig } from '../config.js'
+import {
+  getOpenAICompatibleDefaultModel,
+  getOpenAICompatibleProviderName,
+  getOpenAICompatibleSmallFastModel,
+  isOpenAICodexProviderEnabled,
+  isMoonshotProviderEnabled,
+  isQwenProviderEnabled,
+  isOpenAICompatibleProvider,
+} from './providers.js'
 
 // @[MODEL LAUNCH]: Update all the available and default model option strings below.
 
@@ -267,9 +275,83 @@ function getOpusPlanOption(): ModelOption {
   }
 }
 
+function getOpenAICompatibleModelOptions(): ModelOption[] {
+  const providerName = getOpenAICompatibleProviderName()
+  const defaultModel = getOpenAICompatibleDefaultModel()
+  const smallFastModel = getOpenAICompatibleSmallFastModel()
+  const options = [getDefaultOptionForUser()]
+
+  options.push({
+    value: defaultModel,
+    label: renderModelSetting(defaultModel),
+    description: `${providerName} default model`,
+    descriptionForModel: `${providerName} default model (${defaultModel})`,
+  })
+
+  if (smallFastModel !== defaultModel) {
+    options.push({
+      value: smallFastModel,
+      label: renderModelSetting(smallFastModel),
+      description: `${providerName} fast model`,
+      descriptionForModel: `${providerName} fast model (${smallFastModel})`,
+    })
+  }
+
+  if (isQwenProviderEnabled()) {
+    for (const model of [
+      'qwen3-coder-plus',
+      'qwen3-coder-flash',
+      'qwen3.5-plus',
+      'qwen3.5-flash',
+    ]) {
+      if (!options.some(option => option.value === model)) {
+        options.push({
+          value: model,
+          label: renderModelSetting(model),
+          description: `${providerName} preset model`,
+          descriptionForModel: `${providerName} preset model (${model})`,
+        })
+      }
+    }
+  }
+
+  if (isOpenAICodexProviderEnabled()) {
+    for (const model of [
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex',
+      'gpt-5.3-codex-spark',
+      'gpt-5.2-codex',
+    ]) {
+      if (!options.some(option => option.value === model)) {
+        options.push({
+          value: model,
+          label: renderModelSetting(model),
+          description: `${providerName} preset model`,
+          descriptionForModel: `${providerName} preset model (${model})`,
+        })
+      }
+    }
+  }
+
+  if (isMoonshotProviderEnabled() && defaultModel !== 'kimi-k2.5') {
+    options.push({
+      value: 'kimi-k2.5',
+      label: 'Kimi K2.5',
+      description: 'Moonshot Kimi K2.5',
+    })
+  }
+
+  return options
+}
+
 // @[MODEL LAUNCH]: Update the model picker lists below to include/reorder options for the new model.
 // Each user tier (ant, Max/Team Premium, Pro/Team Standard/Enterprise, PAYG 1P, PAYG 3P) has its own list.
 function getModelOptionsBase(fastMode = false): ModelOption[] {
+  if (isOpenAICompatibleProvider()) {
+    return getOpenAICompatibleModelOptions()
+  }
+
   if (process.env.USER_TYPE === 'ant') {
     // Build options from antModels config
     const antModelOptions: ModelOption[] = getAntModels().map(m => ({

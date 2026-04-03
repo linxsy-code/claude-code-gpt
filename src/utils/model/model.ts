@@ -6,7 +6,6 @@
  * during dead code elimination
  */
 import { getMainLoopModelOverride } from '../../bootstrap/state.js'
-import { resolveAntModel, getAntModelOverrideConfig } from './antModels.js'
 import {
   getSubscriptionType,
   isClaudeAISubscriber,
@@ -24,7 +23,13 @@ import { getModelStrings, resolveOverriddenModel } from './modelStrings.js'
 import { formatModelPricing, getOpus46CostTier } from '../modelCost.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
-import { getAPIProvider } from './providers.js'
+import {
+  getAPIProvider,
+  getOpenAICompatibleConfiguredModel,
+  getOpenAICompatibleDefaultModel,
+  getOpenAICompatibleSmallFastModel,
+  isOpenAICompatibleProvider,
+} from './providers.js'
 import { LIGHTNING_BOLT } from '../../constants/figures.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import { type ModelAlias, isModelAlias } from './aliases.js'
@@ -35,6 +40,9 @@ export type ModelName = string
 export type ModelSetting = ModelName | ModelAlias | null
 
 export function getSmallFastModel(): ModelName {
+  if (isOpenAICompatibleProvider()) {
+    return getOpenAICompatibleSmallFastModel()
+  }
   return process.env.ANTHROPIC_SMALL_FAST_MODEL || getDefaultHaikuModel()
 }
 
@@ -67,7 +75,9 @@ export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
     specifiedModel = modelOverride
   } else {
     const settings = getSettings_DEPRECATED() || {}
-    specifiedModel = process.env.ANTHROPIC_MODEL || settings.model || undefined
+    specifiedModel = isOpenAICompatibleProvider()
+      ? getOpenAICompatibleConfiguredModel() || settings.model || undefined
+      : process.env.ANTHROPIC_MODEL || settings.model || undefined
   }
 
   // Ignore the user-specified model if it's not in the availableModels allowlist.
@@ -99,11 +109,17 @@ export function getMainLoopModel(): ModelName {
 }
 
 export function getBestModel(): ModelName {
+  if (isOpenAICompatibleProvider()) {
+    return getOpenAICompatibleDefaultModel()
+  }
   return getDefaultOpusModel()
 }
 
 // @[MODEL LAUNCH]: Update the default Opus model (3P providers may lag so keep defaults unchanged).
 export function getDefaultOpusModel(): ModelName {
+  if (isOpenAICompatibleProvider()) {
+    return getOpenAICompatibleDefaultModel()
+  }
   if (process.env.ANTHROPIC_DEFAULT_OPUS_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
   }
@@ -118,6 +134,9 @@ export function getDefaultOpusModel(): ModelName {
 
 // @[MODEL LAUNCH]: Update the default Sonnet model (3P providers may lag so keep defaults unchanged).
 export function getDefaultSonnetModel(): ModelName {
+  if (isOpenAICompatibleProvider()) {
+    return getOpenAICompatibleDefaultModel()
+  }
   if (process.env.ANTHROPIC_DEFAULT_SONNET_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
   }
@@ -130,6 +149,9 @@ export function getDefaultSonnetModel(): ModelName {
 
 // @[MODEL LAUNCH]: Update the default Haiku model (3P providers may lag so keep defaults unchanged).
 export function getDefaultHaikuModel(): ModelName {
+  if (isOpenAICompatibleProvider()) {
+    return getOpenAICompatibleSmallFastModel()
+  }
   if (process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL
   }
@@ -217,6 +239,36 @@ export function getDefaultMainLoopModel(): ModelName {
  */
 export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   name = name.toLowerCase()
+  if (name.includes('gpt-5.4-mini')) {
+    return 'gpt-5.4-mini'
+  }
+  if (name.includes('gpt-5.4')) {
+    return 'gpt-5.4'
+  }
+  if (name.includes('gpt-5.3-codex-spark')) {
+    return 'gpt-5.3-codex-spark'
+  }
+  if (name.includes('gpt-5.3-codex')) {
+    return 'gpt-5.3-codex'
+  }
+  if (name.includes('gpt-5.2-codex')) {
+    return 'gpt-5.2-codex'
+  }
+  if (name.includes('qwen3-coder-plus')) {
+    return 'qwen3-coder-plus'
+  }
+  if (name.includes('qwen3-coder-flash')) {
+    return 'qwen3-coder-flash'
+  }
+  if (name.includes('qwen3.5-plus')) {
+    return 'qwen3.5-plus'
+  }
+  if (name.includes('qwen3.5-flash')) {
+    return 'qwen3.5-flash'
+  }
+  if (name.includes('kimi-k2.5')) {
+    return 'kimi-k2.5'
+  }
   // Special cases for Claude 4+ models to differentiate versions
   // Order matters: check more specific versions first (4-5 before 4)
   if (name.includes('claude-opus-4-6')) {
@@ -349,6 +401,26 @@ export function renderModelSetting(setting: ModelName | ModelAlias): string {
  */
 export function getPublicModelDisplayName(model: ModelName): string | null {
   switch (model) {
+    case 'gpt-5.4':
+      return 'GPT-5.4'
+    case 'gpt-5.4-mini':
+      return 'GPT-5.4 Mini'
+    case 'gpt-5.3-codex':
+      return 'GPT-5.3 Codex'
+    case 'gpt-5.3-codex-spark':
+      return 'GPT-5.3 Codex Spark'
+    case 'gpt-5.2-codex':
+      return 'GPT-5.2 Codex'
+    case 'qwen3-coder-plus':
+      return 'Qwen3 Coder Plus'
+    case 'qwen3-coder-flash':
+      return 'Qwen3 Coder Flash'
+    case 'qwen3.5-plus':
+      return 'Qwen3.5 Plus'
+    case 'qwen3.5-flash':
+      return 'Qwen3.5 Flash'
+    case 'kimi-k2.5':
+      return 'Kimi K2.5'
     case getModelStrings().opus46:
       return 'Opus 4.6'
     case getModelStrings().opus46 + '[1m]':
@@ -577,6 +649,36 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   const has1m = modelId.toLowerCase().includes('[1m]')
   const canonical = getCanonicalName(modelId)
 
+  if (canonical.includes('gpt-5.4-mini')) {
+    return 'GPT-5.4 Mini'
+  }
+  if (canonical.includes('gpt-5.4')) {
+    return 'GPT-5.4'
+  }
+  if (canonical.includes('gpt-5.3-codex-spark')) {
+    return 'GPT-5.3 Codex Spark'
+  }
+  if (canonical.includes('gpt-5.3-codex')) {
+    return 'GPT-5.3 Codex'
+  }
+  if (canonical.includes('gpt-5.2-codex')) {
+    return 'GPT-5.2 Codex'
+  }
+  if (canonical.includes('qwen3-coder-plus')) {
+    return 'Qwen3 Coder Plus'
+  }
+  if (canonical.includes('qwen3-coder-flash')) {
+    return 'Qwen3 Coder Flash'
+  }
+  if (canonical.includes('qwen3.5-plus')) {
+    return 'Qwen3.5 Plus'
+  }
+  if (canonical.includes('qwen3.5-flash')) {
+    return 'Qwen3.5 Flash'
+  }
+  if (canonical.includes('kimi-k2.5')) {
+    return 'Kimi K2.5'
+  }
   if (canonical.includes('claude-opus-4-6')) {
     return has1m ? 'Opus 4.6 (with 1M context)' : 'Opus 4.6'
   }

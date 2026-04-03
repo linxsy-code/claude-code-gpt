@@ -62,7 +62,14 @@ type EnvLike = Record<string, string | undefined>
  * @param env Environment variables to check (defaults to process.env for production use)
  */
 export function getProxyUrl(env: EnvLike = process.env): string | undefined {
-  return env.https_proxy || env.HTTPS_PROXY || env.http_proxy || env.HTTP_PROXY
+  return (
+    env.https_proxy ||
+    env.HTTPS_PROXY ||
+    env.http_proxy ||
+    env.HTTP_PROXY ||
+    env.all_proxy ||
+    env.ALL_PROXY
+  )
 }
 
 /**
@@ -106,8 +113,22 @@ export function shouldBypassProxy(
     return noProxyList.some(pattern => {
       pattern = pattern.toLowerCase().trim()
 
+      const wildcardMatches = (value: string, wildcardPattern: string) => {
+        const regex = new RegExp(
+          `^${wildcardPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`,
+        )
+        return regex.test(value)
+      }
+
       // Check for port-specific match
       if (pattern.includes(':')) {
+        const [patternHost, patternPort] = pattern.split(':', 2)
+        if (!patternHost || !patternPort) {
+          return false
+        }
+        if (patternHost.includes('*')) {
+          return wildcardMatches(hostname, patternHost) && port === patternPort
+        }
         return hostWithPort === pattern
       }
 
@@ -117,6 +138,10 @@ export function shouldBypassProxy(
         // but NOT "notexample.com"
         const suffix = pattern
         return hostname === pattern.substring(1) || hostname.endsWith(suffix)
+      }
+
+      if (pattern.includes('*')) {
+        return wildcardMatches(hostname, pattern)
       }
 
       // Check for exact hostname match or IP address
@@ -323,10 +348,69 @@ export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean }): {
  * This ensures all HTTP requests use the proxy and/or mTLS if configured
  */
 let proxyInterceptorId: number | undefined
+let originalGlobalFetch: typeof globalThis.fetch | undefined
+
+function getFetchUrl(input: RequestInfo | URL): string | undefined {
+  if (typeof input === 'string') {
+    return input
+  }
+  if (input instanceof URL) {
+    return input.toString()
+  }
+  if (typeof Request !== 'undefined' && input instanceof Request) {
+    return input.url
+  }
+  return undefined
+}
+
+function configureGlobalFetchProxy(): void {
+  if (typeof Bun === 'undefined') {
+    return
+  }
+  if (!originalGlobalFetch) {
+    originalGlobalFetch = globalThis.fetch.bind(globalThis)
+  }
+
+  globalThis.fetch = ((
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const proxyUrl = getProxyUrl()
+    const url = getFetchUrl(input)
+    const nextInit = { ...(init ?? {}) } as RequestInit & {
+      proxy?: string
+      tls?: TLSConfig
+      unix?: string
+    }
+
+    if (
+      proxyUrl &&
+      url &&
+      nextInit.unix === undefined &&
+      !shouldBypassProxy(url) &&
+      nextInit.proxy === undefined
+    ) {
+      nextInit.proxy = proxyUrl
+    }
+
+    const tlsOptions = getTLSFetchOptions()
+    if (tlsOptions.tls && nextInit.tls === undefined) {
+      nextInit.tls = tlsOptions.tls
+    }
+
+    if (keepAliveDisabled && nextInit.keepalive === undefined) {
+      nextInit.keepalive = false
+    }
+
+    return originalGlobalFetch!(input, nextInit)
+  }) as typeof globalThis.fetch
+}
 
 export function configureGlobalAgents(): void {
   const proxyUrl = getProxyUrl()
   const mtlsAgent = getMTLSAgent()
+
+  configureGlobalFetchProxy()
 
   // Eject previous interceptor to avoid stacking on repeated calls
   if (proxyInterceptorId !== undefined) {

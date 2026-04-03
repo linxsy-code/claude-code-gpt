@@ -161,7 +161,7 @@ export const TaskOutputTool: Tool<InputSchema, TaskOutputToolOutput> = buildTool
     return this.isReadOnly?.(_input) ?? false;
   },
   isEnabled() {
-    return (process.env.USER_TYPE) !== 'ant';
+    return ("external" as string) !== 'ant';
   },
   isReadOnly(_input) {
     return true;

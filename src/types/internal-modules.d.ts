@@ -9,6 +9,7 @@
 // ============================================================================
 declare module "bun:bundle" {
     export function feature(name: string): boolean;
+    export function MACRO<T>(fn: () => T): T;
 }
 
 declare module "bun:ffi" {

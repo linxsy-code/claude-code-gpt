@@ -3,7 +3,6 @@ import { CONTEXT_1M_BETA_HEADER } from '../constants/betas.js'
 import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
-import { resolveAntModel } from './model/antModels.js'
 import { getModelCapability } from './model/modelCapabilities.js'
 
 // Model context window size (200k tokens for all models right now)
@@ -46,7 +45,12 @@ export function modelSupports1M(model: string): boolean {
     return false
   }
   const canonical = getCanonicalName(model)
-  return canonical.includes('claude-sonnet-4') || canonical.includes('opus-4-6')
+  return (
+    canonical.includes('claude-sonnet-4') ||
+    canonical.includes('opus-4-6') ||
+    canonical.includes('qwen3-coder-plus') ||
+    canonical.includes('qwen3-coder-flash')
+  )
 }
 
 export function getContextWindowForModel(
@@ -94,6 +98,31 @@ export function getContextWindowForModel(
     if (antModel?.contextWindow) {
       return antModel.contextWindow
     }
+  }
+  if (getCanonicalName(model).includes('qwen3-coder-plus')) {
+    return 1_000_000
+  }
+  if (getCanonicalName(model).includes('qwen3-coder-flash')) {
+    return 1_000_000
+  }
+  if (getCanonicalName(model).includes('qwen3.5-plus')) {
+    return 1_000_000
+  }
+  if (
+    getCanonicalName(model).includes('gpt-5.2-codex') ||
+    getCanonicalName(model).includes('gpt-5.3-codex') ||
+    getCanonicalName(model).includes('gpt-5.4-mini')
+  ) {
+    return 400_000
+  }
+  if (getCanonicalName(model).includes('gpt-5.4')) {
+    return 272_000
+  }
+  if (getCanonicalName(model).includes('gpt-5.3-codex-spark')) {
+    return 128_000
+  }
+  if (getCanonicalName(model).includes('kimi-k2.5')) {
+    return 131_072
   }
   return MODEL_CONTEXT_WINDOW_DEFAULT
 }
@@ -168,6 +197,27 @@ export function getModelMaxOutputTokens(model: string): {
   if (m.includes('opus-4-6')) {
     defaultTokens = 64_000
     upperLimit = 128_000
+  } else if (
+    m.includes('gpt-5.2-codex') ||
+    m.includes('gpt-5.3-codex') ||
+    m.includes('gpt-5.4') ||
+    m.includes('gpt-5.4-mini')
+  ) {
+    defaultTokens = 128_000
+    upperLimit = 128_000
+  } else if (m.includes('gpt-5.3-codex-spark')) {
+    defaultTokens = 32_000
+    upperLimit = 32_000
+  } else if (
+    m.includes('qwen3-coder-plus') ||
+    m.includes('qwen3-coder-flash') ||
+    m.includes('qwen3.5-plus')
+  ) {
+    defaultTokens = 32_000
+    upperLimit = 65_536
+  } else if (m.includes('kimi-k2.5')) {
+    defaultTokens = 16_384
+    upperLimit = 16_384
   } else if (m.includes('sonnet-4-6')) {
     defaultTokens = 32_000
     upperLimit = 128_000

@@ -1,5 +1,7 @@
 /* eslint-disable custom-rules/no-process-exit -- CLI subcommand handler intentionally exits */
 
+import { loginOpenAICodex } from '@mariozechner/pi-ai/oauth'
+import { createInterface } from 'node:readline/promises'
 import {
   clearAuthRelatedCaches,
   performLogout,
@@ -35,7 +37,19 @@ import { logForDebugging } from '../../utils/debug.js'
 import { isRunningOnHomespace } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
-import { getAPIProvider } from '../../utils/model/providers.js'
+import {
+  getAPIProvider,
+  getOpenAICompatibleApiKey,
+  getOpenAICompatibleApiKeyEnvVarName,
+  getOpenAICompatibleProviderName,
+  isOpenAICodexProviderEnabled,
+} from '../../utils/model/providers.js'
+import { openBrowser } from '../../utils/browser.js'
+import {
+  getOpenAICodexAccountInfoFromToken,
+  getOpenAICodexTokenSource,
+  saveOpenAICodexOAuthCredentials,
+} from '../../utils/openaiCodexAuth.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
@@ -114,12 +128,70 @@ export async function authLogin({
   sso,
   console: useConsole,
   claudeai,
+  provider,
 }: {
   email?: string
   sso?: boolean
   console?: boolean
   claudeai?: boolean
+  provider?: string
 }): Promise<void> {
+  if (provider && provider !== 'anthropic' && provider !== 'openai-codex') {
+    process.stderr.write(
+      'Error: --provider must be either anthropic or openai-codex.\n',
+    )
+    process.exit(1)
+  }
+
+  if (provider === 'openai-codex') {
+    if (email || sso || useConsole || claudeai) {
+      process.stderr.write(
+        'Error: --email, --sso, --console, and --claudeai are not supported with --provider openai-codex.\n',
+      )
+      process.exit(1)
+    }
+
+    try {
+      const credentials = await loginOpenAICodex({
+        onAuth: ({ url, instructions }) => {
+          process.stdout.write('Opening browser to sign in…\n')
+          process.stdout.write(`If the browser did not open, visit: ${url}\n`)
+          if (instructions) {
+            process.stdout.write(`${instructions}\n`)
+          }
+          void openBrowser(url)
+        },
+        onPrompt: async prompt => {
+          const rl = createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          })
+          try {
+            const answer = await rl.question(`${prompt.message} `)
+            return answer.trim()
+          } finally {
+            rl.close()
+          }
+        },
+      })
+
+      const result = saveOpenAICodexOAuthCredentials({
+        ...credentials,
+        ...getOpenAICodexAccountInfoFromToken(credentials.access),
+      })
+      if (result.warning) {
+        process.stderr.write(`Warning: ${result.warning}\n`)
+      }
+
+      process.stdout.write('Login successful.\n')
+      process.exit(0)
+    } catch (err) {
+      logError(err)
+      process.stderr.write(`Login failed: ${errorMessage(err)}\n`)
+      process.exit(1)
+    }
+  }
+
   if (useConsole && claudeai) {
     process.stderr.write(
       'Error: --console and --claudeai cannot be used together.\n',
@@ -233,6 +305,8 @@ export async function authStatus(opts: {
   json?: boolean
   text?: boolean
 }): Promise<void> {
+  const apiProvider = getAPIProvider()
+  const hasOpenAIApiKey = !!getOpenAICompatibleApiKey()
   const { source: authTokenSource, hasToken } = getAuthTokenSource()
   const { source: apiKeySource } = getAnthropicApiKeyWithSource()
   const hasApiKeyEnvVar =
@@ -241,11 +315,20 @@ export async function authStatus(opts: {
   const subscriptionType = getSubscriptionType()
   const using3P = isUsing3PServices()
   const loggedIn =
-    hasToken || apiKeySource !== 'none' || hasApiKeyEnvVar || using3P
+    apiProvider === 'openai'
+      ? hasOpenAIApiKey
+      : hasToken || apiKeySource !== 'none' || hasApiKeyEnvVar || using3P
 
   // Determine auth method
   let authMethod: string = 'none'
-  if (using3P) {
+  if (apiProvider === 'openai') {
+    authMethod =
+      hasOpenAIApiKey && isOpenAICodexProviderEnabled()
+        ? 'oauth_token'
+        : hasOpenAIApiKey
+          ? 'api_key'
+          : 'none'
+  } else if (using3P) {
     authMethod = 'third_party'
   } else if (authTokenSource === 'claude.ai') {
     authMethod = 'claude.ai'
@@ -282,18 +365,37 @@ export async function authStatus(opts: {
         process.stdout.write(`${value}\n`)
       }
     }
-    if (!hasAuthProperty && hasApiKeyEnvVar) {
+    if (apiProvider === 'openai' && hasOpenAIApiKey) {
+      const codexTokenSource = getOpenAICodexTokenSource()
+      process.stdout.write(
+        `API key: ${
+          isOpenAICodexProviderEnabled() && codexTokenSource === 'stored'
+            ? 'OpenAI Codex stored OAuth'
+            : getOpenAICompatibleApiKeyEnvVarName()
+        }\n`,
+      )
+    } else if (!hasAuthProperty && hasApiKeyEnvVar) {
       process.stdout.write('API key: ANTHROPIC_API_KEY\n')
     }
     if (!loggedIn) {
       process.stdout.write(
-        'Not logged in. Run claude auth login to authenticate.\n',
+        apiProvider === 'openai'
+          ? isOpenAICodexProviderEnabled()
+            ? 'Not configured. Run claude auth login --provider openai-codex or set OPENAI_CODEX_ACCESS_TOKEN.\n'
+            : `Not configured. Set ${getOpenAICompatibleApiKeyEnvVarName()} to authenticate with ${getOpenAICompatibleProviderName()}.\n`
+          : 'Not logged in. Run claude auth login to authenticate.\n',
       )
     }
   } else {
-    const apiProvider = getAPIProvider()
+    const codexTokenSource = getOpenAICodexTokenSource()
     const resolvedApiKeySource =
-      apiKeySource !== 'none'
+      apiProvider === 'openai'
+        ? hasOpenAIApiKey
+          ? isOpenAICodexProviderEnabled() && codexTokenSource === 'stored'
+            ? 'OpenAI Codex stored OAuth'
+            : getOpenAICompatibleApiKeyEnvVarName()
+          : null
+        : apiKeySource !== 'none'
         ? apiKeySource
         : hasApiKeyEnvVar
           ? 'ANTHROPIC_API_KEY'

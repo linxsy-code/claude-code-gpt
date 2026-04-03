@@ -8,6 +8,7 @@ import {
 } from './managedEnvConstants.js'
 import { clearMTLSCache } from './mtls.js'
 import { clearProxyCache, configureGlobalAgents } from './proxy.js'
+import { applySystemProxyEnvironmentVariablesFromCache } from './systemProxy.js'
 import { isSettingSourceEnabled } from './settings/constants.js'
 import {
   getSettings_DEPRECATED,
@@ -188,6 +189,8 @@ export function applyConfigEnvironmentVariables(): void {
   Object.assign(process.env, filterSettingsEnv(getGlobalConfig().env))
 
   Object.assign(process.env, filterSettingsEnv(getSettings_DEPRECATED()?.env))
+
+  applySystemProxyEnvironmentVariablesFromCache()
 
   // Clear caches so agents are rebuilt with the new env vars
   clearCACertsCache()

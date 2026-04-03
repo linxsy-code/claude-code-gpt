@@ -36,7 +36,7 @@ import { logForDebugging } from './debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import {
   getAPIProvider,
-  isFirstPartyAnthropicBaseUrl,
+  supportsAnthropicGatewayCapability,
 } from './model/providers.js'
 import { jsonStringify } from './slowOperations.js'
 import { zodToJsonSchema } from './zodToJsonSchema.js'
@@ -297,14 +297,13 @@ export function isToolSearchEnabledOptimistic(): boolean {
   // setup supports it. The falsy check (rather than === undefined) aligns
   // with getToolSearchMode(), which also treats "" as unset.
   if (
-    !process.env.ENABLE_TOOL_SEARCH &&
     getAPIProvider() === 'firstParty' &&
-    !isFirstPartyAnthropicBaseUrl()
+    !supportsAnthropicGatewayCapability('tool_search')
   ) {
     if (!loggedOptimistic) {
       loggedOptimistic = true
       logForDebugging(
-        `[ToolSearch:optimistic] disabled: ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL} is not a first-party Anthropic host. Set ENABLE_TOOL_SEARCH=true (or auto / auto:N) if your proxy forwards tool_reference blocks.`,
+        `[ToolSearch:optimistic] disabled: gateway capability 'tool_search' is unavailable for ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL}. Add tool_search to CLAUDE_CODE_ANTHROPIC_GATEWAY_CAPABILITIES if your gateway translates tool_reference/defer_loading.`,
       )
     }
     return false

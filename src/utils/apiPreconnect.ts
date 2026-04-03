@@ -36,7 +36,11 @@ export function preconnectAnthropicApi(): void {
   if (
     isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
     isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI_CODEX) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_MOONSHOT) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_QWEN)
   ) {
     return
   }

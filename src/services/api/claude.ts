@@ -23,6 +23,7 @@ import { randomUUID } from 'crypto'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
+  supportsAnthropicGatewayCapability,
 } from 'src/utils/model/providers.js'
 import {
   getAttributionHeader,
@@ -236,6 +237,7 @@ import {
   getAssistantMessageFromError,
   getErrorMessageIfRefusal,
 } from './errors.js'
+import { queryModelWithOpenAI } from './openai.js'
 import {
   EMPTY_USAGE,
   type GlobalCacheStrategy,
@@ -297,6 +299,20 @@ export function getExtraBodyParams(betaHeaders?: string[]): JsonObject {
         { level: 'error' },
       )
     }
+  }
+
+  // Anti-distillation: send fake_tools opt-in for 1P CLI only
+  if (
+    feature('ANTI_DISTILLATION_CC')
+      ? process.env.CLAUDE_CODE_ENTRYPOINT === 'cli' &&
+        shouldIncludeFirstPartyOnlyBetas() &&
+        getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_anti_distill_fake_tool_injection',
+          false,
+        )
+      : false
+  ) {
+    result.anti_distillation = ['fake_tools']
   }
 
   // Handle beta headers if provided
@@ -471,7 +487,9 @@ export function configureTaskBudgetParams(
   if (
     !taskBudget ||
     'task_budget' in outputConfig ||
-    !shouldIncludeFirstPartyOnlyBetas()
+    !shouldIncludeFirstPartyOnlyBetas() ||
+    (getAPIProvider() !== 'foundry' &&
+      !supportsAnthropicGatewayCapability('task_budgets'))
   ) {
     return
   }
@@ -1012,6 +1030,17 @@ async function* queryModel(
   StreamEvent | AssistantMessage | SystemAPIErrorMessage,
   void
 > {
+  if (getAPIProvider() === 'openai') {
+    yield* queryModelWithOpenAI({
+      messages,
+      systemPrompt,
+      tools,
+      signal,
+      options,
+    })
+    return
+  }
+
   // Check cheap conditions first — the off-switch await blocks on GrowthBook
   // init (~10ms). For non-Opus models (haiku, sonnet) this skips the await
   // entirely. Subscribers don't hit this path at all.
