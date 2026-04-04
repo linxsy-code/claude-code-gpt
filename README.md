@@ -1,8 +1,6 @@
-# Claude Code Best V3 (CCB)
+# fork from Claude Code Best V3 (CCB)
 
-牢 A (Anthropic) 官方 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI 工具的源码反编译/逆向还原项目。目标是将 Claude Code 大部分功能及工程化能力复现。虽然很难绷, 但是它叫做 CCB(踩踩背)...
-
-[文档在这里, 支持投稿 PR](https://ccb.agent-aura.top/)
+牢 A (Anthropic) 官方 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI 工具的源码反编译/逆向还原项目。目标是将 Claude Code 大部分功能及工程化能力复现。 
 
 赞助商占位符
 
